@@ -6,6 +6,7 @@ local J = require "common"
 local types = require "types"
 local C = require "examplescommon"
 local SDF = require "sdf"
+local Uniform = require "uniform"
 
 local SOCMT
 
@@ -697,7 +698,7 @@ SOC.axiBurstReadN = J.memoize(function(filename,Nbytes,port,address,X)
   J.err( port>=0 and port<=SOC.ports,"axiBurstReadN: port out of range" )
   J.err( type(Nbytes)=="number","axiBurstReadN: Nbytes must be number" )
   J.err( Nbytes % 128 == 0, "AxiBurstReadN: Nbytes must have 128 as a factor" )
-  J.err( type(address)=="number","axiBurstReadN: missing address")
+  address = Uniform(address,types.uint(32))
   J.err( X==nil, "axiBurstReadN: too many arguments" )
 
   local globals = {}
@@ -708,9 +709,11 @@ SOC.axiBurstReadN = J.memoize(function(filename,Nbytes,port,address,X)
   globals[R.newGlobal("IP_MAXI"..port.."_ARLEN","output",types.bits(4))] = 1
   globals[R.newGlobal("IP_MAXI"..port.."_ARSIZE","output",types.bits(2))] = 1
   globals[R.newGlobal("IP_MAXI"..port.."_ARBURST","output",types.bits(2))] = 1
-
+  address:appendGlobals(globals)
+  
   local globalMetadata = {}
   globalMetadata["MAXI"..port.."_read_filename"] = filename
+  globalMetadata["MAXI"..port.."_read_address"] = address
 
   local ModuleName = J.sanitize("DRAMReader_"..tostring(Nbytes).."_"..tostring(port).."_"..tostring(address))
   
@@ -834,7 +837,8 @@ module ]=]..ModuleName..[=[(
     
 //    input wire [31:0] CONFIG_START_ADDR,
 //    input wire [31:0] CONFIG_NBYTES,
-    
+
+    ]=]..address:toVerilogPortList()..[=[    
     //RAM port
     input wire ready_downstream,
     output wire [64:0] process_output
@@ -866,7 +870,7 @@ parameter INSTANCE_NAME="inst";
     //Control config
     .CONFIG_VALID(process_input),
     .CONFIG_READY(ready),
-    .CONFIG_START_ADDR(32'h]=]..string.format('%x',address)..[=[),
+    .CONFIG_START_ADDR(]=]..address:toVerilog()..[=[),
     .CONFIG_NBYTES(32'd]=]..Nbytes..[=[),
     
     //RAM port
@@ -1089,7 +1093,7 @@ SOC.axiBurstWriteN = J.memoize(function(filename,Nbytes,port,address,X)
   J.err( type(port)=="number", "axiBurstWriteN: port must be number" )
   J.err( port>=0 and port<=SOC.ports,"axiBurstWriteN: port out of range" )
   J.err( type(Nbytes)=="number","axiBurstWriteN: Nbytes must be number")
-  J.err( type(address)=="number","axiBurstWriteN: missing address")
+  address = Uniform(address,types.uint(32))
   J.err( X==nil, "axiBurstWriteN: too many arguments" )
 
   J.err(Nbytes%128==0, "SOC.axiBurstWriteN: Nbytes ("..Nbytes..") not 128-byte aligned")
@@ -1105,10 +1109,15 @@ SOC.axiBurstWriteN = J.memoize(function(filename,Nbytes,port,address,X)
   globals[R.newGlobal("IP_MAXI"..port.."_AWLEN","output",types.bits(4))] = 1
   globals[R.newGlobal("IP_MAXI"..port.."_AWSIZE","output",types.bits(2))] = 1
   globals[R.newGlobal("IP_MAXI"..port.."_AWBURST","output",types.bits(2))] = 1
-
+  address:appendGlobals(globals)
+  
   local globalMetadata = {}
   globalMetadata["MAXI"..port.."_write_filename"] = filename
-
+  globalMetadata["MAXI"..port.."_write_address"] = address
+  globalMetadata["MAXI"..port.."_write_W"] = Nbytes
+  globalMetadata["MAXI"..port.."_write_H"] = 1
+  globalMetadata["MAXI"..port.."_write_bitsPerPixel"] = 8
+  
   local res = RM.liftVerilog( "DRAMWriter", R.Handshake(types.bits(64)), R.HandshakeTrigger, 
 [=[module DRAMWriterInner(
     //AXI port
@@ -1266,6 +1275,8 @@ module DRAMWriter(
 //    output wire CONFIG_READY,
 //    input wire [31:0] CONFIG_START_ADDR,
 //    input wire [31:0] CONFIG_NBYTES,
+
+    ]=]..address:toVerilogPortList()..[=[  
     
     //RAM port
     input wire [64:0] process_input,
@@ -1334,7 +1345,7 @@ DRAMWriterInner inner(
     //Control config
     .CONFIG_VALID(firstBufferSet),
     .CONFIG_READY(CONFIG_READY),
-    .CONFIG_START_ADDR(32'h]=]..string.format('%x',address)..[=[),
+    .CONFIG_START_ADDR(]=]..address:toVerilog()..[=[),
     .CONFIG_NBYTES(32'd]=]..Nbytes..[=[),
     
     //RAM port
@@ -1396,6 +1407,8 @@ SOC.readBurst = J.memoize(function(filename,W,H,ty,V,framed,X)
 
   J.err( framed==nil or type(framed)=="boolean", "framed must be nil or bool, but is: "..tostring(framed))
   J.err(X==nil, "readBurst: too many arguments")
+
+  local address = Uniform(SOC.currentAddr,types.uint(32))
   
   local globalMetadata={}
   globalMetadata["MAXI"..SOC.currentMAXIReadPort.."_read_W"] = W
@@ -1403,7 +1416,7 @@ SOC.readBurst = J.memoize(function(filename,W,H,ty,V,framed,X)
   globalMetadata["MAXI"..SOC.currentMAXIReadPort.."_read_V"] = V
   globalMetadata["MAXI"..SOC.currentMAXIReadPort.."_read_type"] = tostring(ty)
   globalMetadata["MAXI"..SOC.currentMAXIReadPort.."_read_bitsPerPixel"] = ty:verilogBits()
-  globalMetadata["MAXI"..SOC.currentMAXIReadPort.."_read_address"] = SOC.currentAddr
+  globalMetadata["MAXI"..SOC.currentMAXIReadPort.."_read_address"] = address
   
   local inp = R.input(R.HandshakeTrigger)
 
@@ -1418,7 +1431,7 @@ SOC.readBurst = J.memoize(function(filename,W,H,ty,V,framed,X)
   assert(totalBits%outputBits==0)
   assert(totalBits>=desiredTotalOutputBits)
   
-  local out = SOC.axiBurstReadN(filename,totalBits/8,SOC.currentMAXIReadPort,SOC.currentAddr)(inp)
+  local out = SOC.axiBurstReadN(filename,totalBits/8,SOC.currentMAXIReadPort,address)(inp)
 
   out = ChangeRateModule(out)
 
@@ -1519,13 +1532,15 @@ SOC.writeBurst = J.memoize(function(filename,W,H,ty,V,framed,X)
   J.err( type(framed)=="boolean","writeBurst: framed must be boolean")
   J.err(X==nil, "writeBurst: too many arguments")
 
+  local address = Uniform(SOC.currentAddr,types.uint(32))
+  
   local globalMetadata={}
   globalMetadata["MAXI"..SOC.currentMAXIWritePort.."_write_W"] = W
   globalMetadata["MAXI"..SOC.currentMAXIWritePort.."_write_H"] = H
   globalMetadata["MAXI"..SOC.currentMAXIWritePort.."_write_V"] = V
   globalMetadata["MAXI"..SOC.currentMAXIWritePort.."_write_type"] = tostring(ty)
   globalMetadata["MAXI"..SOC.currentMAXIWritePort.."_write_bitsPerPixel"] = ty:verilogBits()
-  globalMetadata["MAXI"..SOC.currentMAXIWritePort.."_write_address"] = SOC.currentAddr
+  globalMetadata["MAXI"..SOC.currentMAXIWritePort.."_write_address"] = address
 
   local inputType = ty
   if V>0 then inputType = types.array2d(inputType,V) end

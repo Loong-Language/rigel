@@ -3762,13 +3762,6 @@ function modules.lambda( name, input, output, instances, generatorStr, generator
   res.globals = {}
   res.globalMetadata = {}
 
-  if globalMetadata~=nil then
-    for k,v in pairs(globalMetadata) do
-      J.err(type(k)=="string","global metadata key must be string")
-      res.globalMetadata[k]=v
-    end
-  end
-  
   output:visitEach(
     function(n)
       if n.kind=="apply" then
@@ -3780,13 +3773,27 @@ function modules.lambda( name, input, output, instances, generatorStr, generator
           end
 
           for k,v in pairs(n.fn.globalMetadata) do
-            err(res.globalMetadata[k]==nil,"Error: wrote to global metadata twice!")
+            err(res.globalMetadata[k]==nil,"Error: wrote to global metadata '"..k.."' twice! this value: '"..tostring(v).."', orig value: '"..tostring(res.globalMetadata[k]).."' "..n.loc)
             res.globalMetadata[k] = v
           end
       elseif n.kind=="readGlobal" or n.kind=="writeGlobal" then
         res.globals[n.global]=1
       end
     end)
+
+  -- NOTE: notice that this will overwrite the previous metadata values
+  if globalMetadata~=nil then
+    for k,v in pairs(globalMetadata) do
+      J.err(type(k)=="string","global metadata key must be string")
+
+      if res.globalMetadata[k]~=nil and res.globalMetadata[k]~=v then
+        print("WARNING: overwriting metadata '"..k.."' with previous value '"..tostring(res.globalMetadata[k]).."' ("..type(res.globalMetadata[k])..") with overridden value '"..tostring(v).."' ("..type(v)..")")
+      end
+      
+      res.globalMetadata[k]=v
+    end
+  end
+  
 
   for k,v in pairs(res.instances) do
     for g,_ in pairs(v.fn.globals) do

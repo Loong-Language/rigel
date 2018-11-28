@@ -102,7 +102,7 @@ function systolic.wireIfNecessary( alreadyWiredSet, declarations, ty, name, str,
   return name
 end
 
-function declarePort( ty, name, isInput )
+function systolic.declarePort( ty, name, isInput )
   err( type(name)=="string","declarePort: name should be string but is "..tostring(name))
 
   local t = "input wire "
@@ -1598,7 +1598,7 @@ function userModuleFunctions:toVerilog()
       end
     end
     
-    table.insert(t,table.concat(J.map(portlist,function(n) return declarePort(n[2],n[1],n[3]) end),", "))
+    table.insert(t,table.concat(J.map(portlist,function(n) return systolic.declarePort(n[2],n[1],n[3]) end),", "))
     table.insert(t,");\n")
 
     table.insert(t,[[parameter INSTANCE_NAME="INST";]].."\n")
